@@ -42,8 +42,13 @@ type examConfig struct {
 }
 
 type File struct {
+	ID     string
 	Title  string
 	FileID string
+}
+
+type admin struct {
+	TgID string
 }
 
 var sessions = map[int64]*session{}
@@ -138,6 +143,14 @@ func constructSubjectMarkup(grade int) [][]tg.InlineKeyboardButton {
 	return reply
 }
 
+func constructDeleteMarkup(fileID string) tg.InlineKeyboardMarkup {
+	return tg.NewInlineKeyboardMarkup(
+		tg.NewInlineKeyboardRow(
+			tg.NewInlineKeyboardButtonData("حذف الملف ", fmt.Sprintf("deleteImage:%s", fileID)),
+		),
+	)
+}
+
 func parseString(s string) (string, string) {
 	parts := strings.SplitN(s, ":", 2)
 	if len(parts) != 2 {
@@ -170,7 +183,7 @@ func deleteCallbackMessage(cb tg.CallbackQuery) error {
 
 func findFileIDs(s examConfig) ([]File, error) {
 	rows, err := DB.Query(
-		"SELECT fileID , title FROM exams WHERE exam = ? AND grade = ? AND subject = ?",
+		"SELECT id , fileID , title FROM exams WHERE exam = ? AND grade = ? AND subject = ?",
 		s.Exam, s.Grade, s.Subject,
 	)
 	if err != nil {
@@ -181,7 +194,8 @@ func findFileIDs(s examConfig) ([]File, error) {
 	var result []File
 	for rows.Next() {
 		var f File
-		if err := rows.Scan(&f.FileID, &f.Title); err != nil {
+
+		if err := rows.Scan(&f.ID, &f.FileID, &f.Title); err != nil {
 			return nil, err
 		}
 		result = append(result, f)
@@ -195,6 +209,52 @@ func insertFile(p *pendingUpload) error {
 		p.Exam, p.Grade, p.Subject, p.Title, p.FileID,
 	)
 	return err
+}
+
+func deleteImage(imageID string) error {
+
+	_, err := DB.Exec("DELETE FROM exams WHERE id = ? ", imageID)
+
+	return err
+}
+
+func getAdmins() ([]admin, error) {
+	rows, err := DB.Query("SELECT tgID FROM admins")
+	if err != nil {
+		return nil, err
+	}
+
+	var admins []admin
+
+	for rows.Next() {
+		var currAdmin admin
+
+		if err = rows.Scan(&currAdmin.TgID); err != nil {
+			return nil, err
+		}
+
+		admins = append(admins, currAdmin)
+
+	}
+
+	return admins, nil
+
+}
+
+func isAdmin(userID int64) (bool, error) {
+
+	admins, err := getAdmins()
+
+	if err != nil {
+		return false, err
+	}
+
+	for _, admin := range admins {
+		if admin.TgID == strconv.FormatInt(userID, 10) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func main() {
@@ -214,6 +274,8 @@ func main() {
 	u.Timeout = 90
 	updates := bot.GetUpdatesChan(u)
 
+	fmt.Println("running")
+
 	for update := range updates {
 
 		if update.Message != nil {
@@ -230,6 +292,16 @@ func main() {
 
 				photo := msg.Photo[len(msg.Photo)-1].FileID
 				uploadID := fmt.Sprintf("%d_%d", msg.From.ID, time.Now().UnixNano())
+
+				isAdmin, err := isAdmin(update.Message.From.ID)
+
+				if err != nil {
+					fmt.Println(err)
+				}
+
+				if isAdmin {
+
+				}
 
 				pendingUploads[uploadID] = &pendingUpload{
 					ID:      uploadID,
@@ -344,17 +416,29 @@ func main() {
 						delete(sessions, cb.From.ID)
 						continue
 					}
+					isAdmin, err := isAdmin(cb.From.ID)
+					if err != nil {
+						panic(err)
+					}
 					for _, f := range files {
 						photo := tg.NewPhoto(cb.From.ID, tg.FileID(f.FileID))
 						photo.Caption = f.Title
+						if isAdmin {
+							fmt.Println("yes he is an admin indeed")
+
+							photo.ReplyMarkup = constructDeleteMarkup(f.ID)
+						}
 						bot.Send(photo)
+
 					}
+
 					delete(sessions, cb.From.ID)
 				}
 
 			case "confirmation":
 				p, exists := pendingUploads[value]
 				if !exists {
+					bot.Send(tg.NewMessage(cb.From.ID, "تم القبول سابقا"))
 					continue
 				}
 				if err := insertFile(p); err == nil {
@@ -371,6 +455,34 @@ func main() {
 				reject := tg.NewMessage(p.ChatID, "تم رفض اضافة الملف")
 				bot.Send(reject)
 				delete(pendingUploads, value)
+			case "deleteImage":
+				chatID := cb.From.ID
+				isAdmin, err := isAdmin(chatID)
+				if err != nil {
+					panic(err)
+				}
+				if !isAdmin {
+					fmt.Println("not authorized !")
+					bot.Send(tg.NewMessage(cb.Message.Chat.ID, "انت لست مشرف"))
+					continue
+				}
+
+				err = deleteImage(value)
+				if err != nil {
+					if err == sql.ErrNoRows {
+						if _, err := bot.Send(tg.NewMessage(cb.From.ID, "هذه الصورة غير موجودة")); err != nil {
+							fmt.Print(err)
+						}
+
+						continue
+					}
+
+					fmt.Println(err)
+					continue
+				}
+
+				bot.Send(tg.NewMessage(cb.From.ID, "تم حذف الملف بنجاح"))
+
 			}
 		}
 	}
