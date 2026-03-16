@@ -320,11 +320,7 @@ func main() {
 					fmt.Println(err)
 				}
 
-				if isAdmin {
-
-				}
-
-				pendingUploads[uploadID] = &pendingUpload{
+				pendingUpload := &pendingUpload{
 					ID:      uploadID,
 					UserID:  msg.From.ID,
 					Grade:   s.Grade,
@@ -334,6 +330,17 @@ func main() {
 					FileID:  photo,
 					ChatID:  msg.Chat.ID,
 				}
+
+				if isAdmin {
+
+					if err := insertFile(pendingUpload); err == nil {
+						success := tg.NewMessage(pendingUpload.ChatID, "تم اضافة الملف بنجاح")
+						bot.Send(success)
+					}
+					continue
+				}
+
+				pendingUploads[uploadID] = pendingUpload
 
 				newMsg.Text = "سوف يتم الارسال الى المشرفين لتأكيد الاضافة"
 				bot.Send(newMsg)
@@ -477,6 +484,8 @@ func main() {
 				}
 				if err := insertFile(p); err == nil {
 					success := tg.NewMessage(p.ChatID, "تم اضافة الملف بنجاح")
+					bot.Send(success)
+					success.ChatID = cb.From.ID
 					bot.Send(success)
 				}
 				delete(pendingUploads, value)
