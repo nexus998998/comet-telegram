@@ -54,6 +54,8 @@ type admin struct {
 var sessions = map[int64]*session{}
 var pendingUploads = map[string]*pendingUpload{}
 
+var adminCounter int
+
 var adminChatIDS = []int64{1743591825}
 
 var startMarkup = tg.NewInlineKeyboardMarkup(
@@ -257,6 +259,25 @@ func isAdmin(userID int64) (bool, error) {
 	return false, nil
 }
 
+func getNextAdmin() (admin, error) {
+	admins, err := getAdmins()
+	if err != nil {
+		return admin{}, err
+	}
+
+	fmt.Println(len(admins))
+
+	admin := admins[adminCounter]
+
+	if adminCounter >= (len(admins) - 1) {
+		adminCounter = 0
+	} else {
+		adminCounter++
+	}
+
+	return admin, nil
+}
+
 func main() {
 	var err error
 	token := os.Getenv("TOKEN")
@@ -317,10 +338,23 @@ func main() {
 				newMsg.Text = "سوف يتم الارسال الى المشرفين لتأكيد الاضافة"
 				bot.Send(newMsg)
 
-				f := tg.NewForward(adminChatIDS[0], msg.Chat.ID, msg.MessageID)
+				admin, err := getNextAdmin()
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+
+				tgID, err := strconv.ParseInt(admin.TgID, 10, 64)
+
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+
+				f := tg.NewForward(tgID, msg.Chat.ID, msg.MessageID)
 				bot.Send(f)
 
-				ask := tg.NewMessage(adminChatIDS[0], "هل توافق")
+				ask := tg.NewMessage(tgID, "هل توافق")
 				ask.ReplyMarkup = constructReplyMarkup(uploadID)
 				bot.Send(ask)
 
