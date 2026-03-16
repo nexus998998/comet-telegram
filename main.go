@@ -82,6 +82,9 @@ var subjectMarkup = tg.NewInlineKeyboardMarkup(
 		tg.NewInlineKeyboardButtonData("اسلامية", "subject:7"),
 		tg.NewInlineKeyboardButtonData("فرنسي", "subject:8"),
 	),
+	tg.NewInlineKeyboardRow(
+		tg.NewInlineKeyboardButtonData("الخروج", "exit:"),
+	),
 )
 
 var grade = tg.NewInlineKeyboardMarkup(
@@ -94,6 +97,9 @@ var grade = tg.NewInlineKeyboardMarkup(
 		tg.NewInlineKeyboardButtonData("رابع علمي", "grade:4"),
 		tg.NewInlineKeyboardButtonData("خامس علمي", "grade:5"),
 		tg.NewInlineKeyboardButtonData("سادس علمي", "grade:6"),
+	),
+	tg.NewInlineKeyboardRow(
+		tg.NewInlineKeyboardButtonData("الخروج", "exit:"),
 	),
 )
 
@@ -112,36 +118,38 @@ var examMarkup = tg.NewInlineKeyboardMarkup(
 	tg.NewInlineKeyboardRow(
 		tg.NewInlineKeyboardButtonData("نهاية السنة", "exam:6"),
 	),
+	tg.NewInlineKeyboardRow(
+		tg.NewInlineKeyboardButtonData("الخروج", "exit:"),
+	),
 )
 
 func constructSubjectMarkup(grade int) [][]tg.InlineKeyboardButton {
 	reply := subjectMarkup.InlineKeyboard
 	switch grade {
 	case 3:
-		return append(reply, tg.NewInlineKeyboardRow(
+		reply = append(reply, tg.NewInlineKeyboardRow(
 			tg.NewInlineKeyboardButtonData("اجتماعيات", "subject:12"),
 		))
-	case 6:
-		return reply
 	case 1, 2, 4, 5:
 		reply = append(reply, tg.NewInlineKeyboardRow(
 			tg.NewInlineKeyboardButtonData("حاسوب", "subject:9"),
 		))
 		if grade == 4 {
-			return append(reply, tg.NewInlineKeyboardRow(
+			reply = append(reply, tg.NewInlineKeyboardRow(
 				tg.NewInlineKeyboardButtonData("جرائم حزب البعث", "subject:10"),
 			))
 		}
 		if grade == 1 || grade == 2 {
-			reply = append(reply, tg.NewInlineKeyboardRow(
-				tg.NewInlineKeyboardButtonData("التربية الاخلاقية", "subject:11"),
-			))
-			return append(reply, tg.NewInlineKeyboardRow(
-				tg.NewInlineKeyboardButtonData("الاجتماعيات", "subject:12"),
-			))
+			reply = append(reply,
+				tg.NewInlineKeyboardRow(tg.NewInlineKeyboardButtonData("التربية الاخلاقية", "subject:11")),
+				tg.NewInlineKeyboardRow(tg.NewInlineKeyboardButtonData("الاجتماعيات", "subject:12")),
+			)
 		}
-		return reply
 	}
+
+	reply = append(reply, tg.NewInlineKeyboardRow(
+		tg.NewInlineKeyboardButtonData("الخروج", "exit:"),
+	))
 	return reply
 }
 
@@ -207,8 +215,8 @@ func findFileIDs(s examConfig) ([]File, error) {
 
 func insertFile(p *pendingUpload) error {
 	_, err := DB.Exec(
-		"INSERT INTO exams (exam , grade , subject , title , fileID ) VALUES (? , ? , ? , ? , ?)",
-		p.Exam, p.Grade, p.Subject, p.Title, p.FileID,
+		"INSERT INTO exams (exam , grade , subject , title , fileID , userID ) VALUES (? , ? , ? , ? , ? , ?)",
+		p.Exam, p.Grade, p.Subject, p.Title, p.FileID, strconv.FormatInt(p.UserID, 10),
 	)
 	return err
 }
@@ -563,6 +571,22 @@ func main() {
 				}
 
 				bot.Send(tg.NewMessage(cb.From.ID, "تم حذف الملف بنجاح"))
+			case "exit":
+				_, exists := sessions[cb.From.ID]
+
+				if !exists {
+					continue
+				}
+
+				delete(sessions, cb.From.ID)
+
+				msg := tg.NewMessage(cb.From.ID, "اختار الامر : ")
+
+				msg.ReplyMarkup = startMarkup
+
+				deleteCallbackMessage(*cb)
+
+				bot.Send(msg)
 
 			}
 		}
