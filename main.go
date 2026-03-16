@@ -56,7 +56,7 @@ var pendingUploads = map[string]*pendingUpload{}
 
 var adminCounter int
 
-var adminChatIDS = []int64{1743591825}
+var ownerChatID = 1743591825
 
 var startMarkup = tg.NewInlineKeyboardMarkup(
 	tg.NewInlineKeyboardRow(
@@ -278,6 +278,18 @@ func getNextAdmin() (admin, error) {
 	return admin, nil
 }
 
+func promoteAdmin(userID int64) error {
+	userIDString := strconv.FormatInt(userID, 10)
+
+	_, err := DB.Exec("INSERT INTO admins (tgID) VALUES (?)", userIDString)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
 	var err error
 	token := os.Getenv("TOKEN")
@@ -375,10 +387,36 @@ func main() {
 				continue
 			}
 
+			if msg.Command() == "promoteAdmin" {
+				if update.Message.From.ID != int64(ownerChatID) {
+					fmt.Println("unauthorized")
+					bot.Send(tg.NewMessage(update.Message.From.ID, "هذا الامر يخص المالك فقط"))
+					continue
+				}
+
+				userID, err := strconv.ParseInt(msg.CommandArguments(), 10, 64)
+				if err != nil {
+					bot.Send(tg.NewMessage(update.Message.Chat.ID, "invalid arguement"))
+					continue
+				}
+
+				err = promoteAdmin(userID)
+
+				if err != nil {
+					bot.Send(tg.NewMessage(int64(ownerChatID), err.Error()))
+					continue
+
+				}
+
+				bot.Send(tg.NewMessage(int64(ownerChatID), "promoted to admin successfully"))
+
+				continue
+			}
+
 			if s, exists := sessions[msg.From.ID]; exists && s.LookingForTitle {
 				s.LookingForTitle = false
 				s.Title = msg.Text
-				newMsg.Text = "ارسل صور الامتحان "
+				newMsg.Text = "ارسل صور الامتحان (كلهن سوية)"
 				bot.Send(newMsg)
 			}
 		}
