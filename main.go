@@ -20,19 +20,21 @@ type session struct {
 	Exam            int
 	Subject         int
 	LookingForTitle bool
+	FirstName       string
 	Title           string
 	Type            string
 }
 
 type pendingUpload struct {
-	ID      string
-	UserID  int64
-	Grade   int
-	Exam    int
-	Subject int
-	Title   string
-	FileID  string
-	ChatID  int64
+	ID        string
+	UserID    int64
+	Grade     int
+	Exam      int
+	Subject   int
+	Title     string
+	FileID    string
+	FirstName string
+	ChatID    int64
 }
 
 type examConfig struct {
@@ -62,6 +64,9 @@ var startMarkup = tg.NewInlineKeyboardMarkup(
 	tg.NewInlineKeyboardRow(
 		tg.NewInlineKeyboardButtonData("عرض امتحان", "showExam:"),
 		tg.NewInlineKeyboardButtonData("رفع امتحان", "uploadExam:"),
+	),
+	tg.NewInlineKeyboardRow(
+		tg.NewInlineKeyboardButtonData("قائمة المتصدرين في المشاركات", "leaderboard:"),
 	),
 )
 
@@ -215,10 +220,37 @@ func findFileIDs(s examConfig) ([]File, error) {
 
 func insertFile(p *pendingUpload) error {
 	_, err := DB.Exec(
-		"INSERT INTO exams (exam , grade , subject , title , fileID , userID ) VALUES (? , ? , ? , ? , ? , ?)",
+		"INSERT OR IGNORE INTO exams (exam , grade , subject , title , fileID , userID ) VALUES (? , ? , ? , ? , ? , ?)",
 		p.Exam, p.Grade, p.Subject, p.Title, p.FileID, strconv.FormatInt(p.UserID, 10),
 	)
-	return err
+
+	if err != nil {
+		return err
+	}
+
+	var exists bool
+	row := DB.QueryRow("SELECT EXISTS (SELECT 1 FROM users WHERE userID = ?) ", p.UserID)
+	err = row.Scan(&exists)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		_, err := DB.Exec("INSERT INTO users (userID , firstName , points) VALUES (? , ? , ?) ", p.UserID, p.FirstName, 1)
+
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	_, err = DB.Exec("UPDATE users SET points = points + 1 WHERE userID = ? ", p.UserID)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func deleteImage(imageID string) error {
@@ -298,6 +330,38 @@ func promoteAdmin(userID int64) error {
 	return nil
 }
 
+func getLeaderBoard() (string, error) {
+	rows, err := DB.Query("SELECT FirstName , points FROM users ORDER BY points LIMIT 20 ")
+	if err != nil {
+		return "", err
+	}
+
+	leaderBoard := "قائمة المتصدرين : \n"
+
+	count := 0
+	for rows.Next() {
+		count++
+		var firstName string
+		var points string
+
+		err := rows.Scan(&firstName, &points)
+
+		if err != nil {
+			return "", err
+		}
+
+		leaderBoard += fmt.Sprintf("%d- %s النقاط : %s ", count, firstName, points)
+
+	}
+
+	if count == 0 {
+		leaderBoard += "لا يوجد مشاركين حاليا"
+	}
+
+	return leaderBoard, nil
+
+}
+
 func main() {
 	var err error
 	token := os.Getenv("TOKEN")
@@ -341,22 +405,26 @@ func main() {
 				}
 
 				pendingUpload := &pendingUpload{
-					ID:      uploadID,
-					UserID:  msg.From.ID,
-					Grade:   s.Grade,
-					Exam:    s.Exam,
-					Subject: s.Subject,
-					Title:   s.Title,
-					FileID:  photo,
-					ChatID:  msg.Chat.ID,
+					ID:        uploadID,
+					UserID:    msg.From.ID,
+					Grade:     s.Grade,
+					Exam:      s.Exam,
+					Subject:   s.Subject,
+					FirstName: s.FirstName,
+					Title:     s.Title,
+					FileID:    photo,
+					ChatID:    msg.Chat.ID,
 				}
 
 				if isAdmin {
 
-					if err := insertFile(pendingUpload); err == nil {
-						success := tg.NewMessage(pendingUpload.ChatID, "تم اضافة الملف بنجاح")
-						bot.Send(success)
+					if err := insertFile(pendingUpload); err != nil {
+						fmt.Println(err)
+
+						continue
 					}
+					success := tg.NewMessage(pendingUpload.ChatID, "تم اضافة الملف بنجاح")
+					bot.Send(success)
 					continue
 				}
 
@@ -466,6 +534,7 @@ func main() {
 				}
 				e, _ := strconv.Atoi(value)
 				s.Exam = e
+				s.FirstName = cb.From.FirstName
 				newMsg.Text = "اختار المادة"
 				newMsg.ReplyMarkup = tg.InlineKeyboardMarkup{
 					InlineKeyboard: constructSubjectMarkup(s.Grade),
@@ -587,6 +656,18 @@ func main() {
 				deleteCallbackMessage(*cb)
 
 				bot.Send(msg)
+
+			case "leaderboard":
+				leaderboard, err := getLeaderBoard()
+				if err != nil {
+					fmt.Println(err)
+
+					bot.Send(tg.NewMessage(cb.From.ID, "حدث خطأ في الخادم"))
+
+					continue
+				}
+
+				bot.Send(tg.NewMessage(cb.From.ID, leaderboard))
 
 			}
 		}
